@@ -1,0 +1,15 @@
+[Unit]
+Description=Hello World Go Service
+After=network.target
+
+[Service]
+User=madmax
+Group=madmax
+EnvironmentFile=/etc/default/hello-world
+ExecStart=/opt/hello-world/hello-world $HELLO_WORLD_ARGS
+Restart=always
+RestartSec=5
+SuccessExitStatus=143
+
+[Install]
+WantedBy=multi-user.target

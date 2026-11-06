@@ -1,0 +1,36 @@
+# Собранные бинарники приложения в корне проекта
+/hello-world
+/hello-world_*
+
+# Архивы, создаваемые job release
+*.tar.gz
+*.zip
+
+# Локальный кэш сборки Go
+.go-build-cache/
+
+# Результаты тестирования и покрытия Go
+*.test
+*.out
+coverage.*
+profile.cov
+
+# Секреты, ключи и окружение
+deploy_key
+*.pem
+*.key
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+.env
+.env.*
+
+# Системные файлы
+.DS_Store
+
+# Временные файлы редакторов
+*.swp
+
+# Конфигурация GitLab CI/CD не используется в GitHub-варианте
+.gitlab-ci.yml
