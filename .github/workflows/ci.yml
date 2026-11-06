@@ -1,0 +1,161 @@
+name: Build, release and deploy hello-world
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Action to run"
+        required: true
+        default: "deploy"
+        type: choice
+        options:
+          - deploy
+          - remove
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Go application
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Build application
+        env:
+          VERSION: "1.0.${{ github.run_number }}"
+        run: |
+          go version
+          go build -ldflags "-X main.buildVersion=${VERSION}" -o "hello-world_${VERSION}" .
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hello-world-${{ github.run_number }}
+          path: hello-world_${{ github.run_number }}
+          retention-days: 1
+
+  release:
+    name: Create archive and upload to Nexus
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: hello-world-${{ github.run_number }}
+          path: .
+
+      - name: Create archive
+        env:
+          VERSION: "1.0.${{ github.run_number }}"
+        run: |
+          test -f "hello-world_${VERSION}"
+          tar -czf "hello-world_${VERSION}.tar.gz" "hello-world_${VERSION}"
+
+      - name: Upload archive to Nexus
+        env:
+          VERSION: "1.0.${{ github.run_number }}"
+          NEXUS_URL: ${{ vars.NEXUS_URL }}
+          NEXUS_REPO: ${{ vars.NEXUS_REPO }}
+          NEXUS_USER: ${{ secrets.NEXUS_USER }}
+          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
+        run: |
+          curl -f -u "${NEXUS_USER}:${NEXUS_PASSWORD}" \
+            --upload-file "hello-world_${VERSION}.tar.gz" \
+            "${NEXUS_URL}/repository/${NEXUS_REPO}/${VERSION}/hello-world_${VERSION}.tar.gz"
+
+  deploy:
+    name: Deploy application to GitHub worker
+    runs-on: ubuntu-latest
+    needs: release
+    if: github.event.inputs.action == 'deploy'
+    environment: production
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare SSH key
+        env:
+          SSH_PRIVATE_KEY_B64: ${{ secrets.SSH_PRIVATE_KEY_B64 }}
+        run: |
+          echo "${SSH_PRIVATE_KEY_B64}" | base64 -d > deploy_key
+          chmod 400 deploy_key
+
+      - name: Copy deploy files to target VM
+        env:
+          VM_HOST: ${{ vars.VM_HOST }}
+          VM_USER: ${{ vars.VM_USER }}
+        run: |
+          scp -i deploy_key -o StrictHostKeyChecking=accept-new \
+            deploy/hello-world.service \
+            deploy/deploy.sh \
+            deploy/remove.sh \
+            "${VM_USER}@${VM_HOST}:/home/${VM_USER}/"
+
+      - name: Deploy application
+        env:
+          VERSION: "1.0.${{ github.run_number }}"
+          NEXUS_URL: ${{ vars.NEXUS_URL }}
+          NEXUS_REPO: ${{ vars.NEXUS_REPO }}
+          NEXUS_USER: ${{ secrets.NEXUS_USER }}
+          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
+          VM_HOST: ${{ vars.VM_HOST }}
+          VM_USER: ${{ vars.VM_USER }}
+          FEATURE_IP: ${{ vars.FEATURE_IP }}
+          FEATURE_COUNTRY: ${{ vars.FEATURE_COUNTRY }}
+          FEATURE_FORM: ${{ vars.FEATURE_FORM }}
+        run: |
+          ssh -i deploy_key -o StrictHostKeyChecking=accept-new \
+            "${VM_USER}@${VM_HOST}" \
+            "chmod +x /home/${VM_USER}/deploy.sh /home/${VM_USER}/remove.sh && \
+            VERSION='${VERSION}' \
+            NEXUS_URL='${NEXUS_URL}' \
+            NEXUS_USER='${NEXUS_USER}' \
+            NEXUS_PASSWORD='${NEXUS_PASSWORD}' \
+            NEXUS_REPO='${NEXUS_REPO}' \
+            FEATURE_IP='${FEATURE_IP}' \
+            FEATURE_COUNTRY='${FEATURE_COUNTRY}' \
+            FEATURE_FORM='${FEATURE_FORM}' \
+            /home/${VM_USER}/deploy.sh"
+
+      - name: Check application response
+        env:
+          VM_HOST: ${{ vars.VM_HOST }}
+        run: |
+          curl -fsS "http://${VM_HOST}:8080/"
+
+  remove:
+    name: Remove application from GitHub worker
+    runs-on: ubuntu-latest
+    needs: release
+    if: github.event.inputs.action == 'remove'
+    environment: production
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare SSH key
+        env:
+          SSH_PRIVATE_KEY_B64: ${{ secrets.SSH_PRIVATE_KEY_B64 }}
+        run: |
+          echo "${SSH_PRIVATE_KEY_B64}" | base64 -d > deploy_key
+          chmod 400 deploy_key
+
+      - name: Remove application
+        env:
+          VM_HOST: ${{ vars.VM_HOST }}
+          VM_USER: ${{ vars.VM_USER }}
+        run: |
+          ssh -i deploy_key -o StrictHostKeyChecking=accept-new \
+            "${VM_USER}@${VM_HOST}" \
+            "chmod +x /home/${VM_USER}/remove.sh && /home/${VM_USER}/remove.sh"
