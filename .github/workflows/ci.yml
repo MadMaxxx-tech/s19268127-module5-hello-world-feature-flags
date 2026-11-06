@@ -15,6 +15,9 @@ on:
 permissions:
   contents: read
 
+env:
+  VERSION: "1.0.${{ github.run_number }}"
+
 jobs:
   build:
     name: Build Go application
@@ -31,8 +34,6 @@ jobs:
           cache-dependency-path: go.sum
 
       - name: Build application
-        env:
-          VERSION: "1.0.${{ github.run_number }}"
         run: |
           go version
           go build -ldflags "-X main.buildVersion=${VERSION}" -o "hello-world_${VERSION}" .
@@ -41,7 +42,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: hello-world-${{ github.run_number }}
-          path: hello-world_${{ github.run_number }}
+          path: hello-world_${{ env.VERSION }}
+          if-no-files-found: error
           retention-days: 1
 
   release:
@@ -56,15 +58,12 @@ jobs:
           path: .
 
       - name: Create archive
-        env:
-          VERSION: "1.0.${{ github.run_number }}"
         run: |
           test -f "hello-world_${VERSION}"
           tar -czf "hello-world_${VERSION}.tar.gz" "hello-world_${VERSION}"
 
       - name: Upload archive to Nexus
         env:
-          VERSION: "1.0.${{ github.run_number }}"
           NEXUS_URL: ${{ vars.NEXUS_URL }}
           NEXUS_REPO: ${{ vars.NEXUS_REPO }}
           NEXUS_USER: ${{ secrets.NEXUS_USER }}
@@ -104,7 +103,6 @@ jobs:
 
       - name: Deploy application
         env:
-          VERSION: "1.0.${{ github.run_number }}"
           NEXUS_URL: ${{ vars.NEXUS_URL }}
           NEXUS_REPO: ${{ vars.NEXUS_REPO }}
           NEXUS_USER: ${{ secrets.NEXUS_USER }}
